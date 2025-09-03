@@ -1,0 +1,170 @@
+# =============================================================================
+# PFNO Model Configuration
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Model Architecture Configuration
+# -----------------------------------------------------------------------------
+architecture:
+  # 网络架构参数
+  hidden_channels: 64
+  lifting_channels: 256
+  projection_channels: 256
+  n_layers: 2
+  n_modes: [16, 16]
+  in_channels: 1
+  dropout: 0.3
+  n_attn_heads: 2
+  fno_output_layer_indices: [0, 1]
+
+# -----------------------------------------------------------------------------
+# Probabilistic Model Parameters
+# -----------------------------------------------------------------------------
+probabilistic:
+  # 概率模型参数
+  n_samples: 400
+  monte_carlo_samples: 200 # 蒙特卡洛采样数量
+  confidence_threshold: 0.3  # 后处理阈值
+  uncertainty_threshold: 0.2  # 后处理阈值
+  numerical_stability_check: true
+
+# -----------------------------------------------------------------------------
+# Causal Discovery Configuration
+# -----------------------------------------------------------------------------
+causal:
+  # DAG约束设置
+  use_dag_constraint: true
+  dag_constraint_method: improved  # DAG约束计算方法
+
+# -----------------------------------------------------------------------------
+# Training Configuration
+# -----------------------------------------------------------------------------
+training:
+  # 基础训练参数
+  num_epochs: 25
+  batch_size: 200
+  learning_rate: 0.0006
+  optimizer: AdamW
+  weight_decay: 0
+  gradient_clipping: 1.0
+
+  # 学习率调度
+  scheduler:
+    name: CosineAnnealingWarmRestarts
+    T_0: 15
+    T_mult: 3
+    eta_min: 0.00002
+
+  # 早停设置
+  patience: 7
+  min_delta: 0.00005
+  early_stopping_thresh: 1.0
+  init_iter: 10
+
+  # 损失权重配置
+  loss_weights:
+    recon_loss: 8
+    # reconstruction_weights 中的 dist 和 direct 权重现在使用静态配置
+    reconstruction_weights:
+      dist: 0.6                   # 分布损失权重
+      direct: 0.4                 # 直接损失权重，更关注主要预测任务
+    l1_regularization: 0.0006    #L1正则化
+    l2_regularization: 0.0015      #L2权重
+    entropy_regularization: 0.08
+    dag_constraint: 0.001
+    # 注意: DAG约束权重现在由 loss_weights.dag_constraint 统一控制
+  
+    # 动态DAG权重配置
+    dynamic_dag_weight:
+      enabled: false               # 开启动态权重
+      start_epoch: 45             # 权重开始增加的epoch
+      end_epoch: 60               # 权重达到最大值的epoch
+      end_weight: 0.006             # 最终的DAG权重值
+
+  # 损失函数说明:
+  # recon_loss: 分布损失和直接损失的加权和
+  #   - distributional_loss (NLL): 捕捉模型预测的不确定性
+  #   - direct_loss (MSE): 惩罚较大的预测误差，对异常值更敏感
+  # L1正则化: 应用于概率学习器，控制因果关系稀疏度
+  # L2正则化: 应用于全网络，防止过拟合
+  # DAG约束: 确保因果图为有向无环图
+
+# -----------------------------------------------------------------------------
+# Data Configuration
+# -----------------------------------------------------------------------------
+data:
+  # 数据文件
+  file_path: data/generated_time_series2.csv
+  ground_truth_file: data/causal_adjacency_matrix2.csv
+  
+  # 数据处理
+  sequence_length: 50
+  train_ratio: 0.8
+  max_time_steps: 1000
+  
+  # 数据预处理
+  preprocessing:
+    method: standard  # standard, minimal, comprehensive, time_series_focused
+    standard:
+      normalize: true
+      normalization_method: zscore
+      handle_missing: true
+      missing_method: interpolate
+      handle_outliers: true
+      outlier_method: iqr
+      outlier_threshold: 3
+      clip_outliers: true
+      clip_percentiles: [1, 99]
+  
+  # 数据增强
+  augment: false
+  augmentation:
+    factor: 5
+    techniques: [scaling]
+    noise_level: [0.01, 0.05]
+    scale_range: [0.8, 1.2]
+
+# -----------------------------------------------------------------------------
+# Evaluation Configuration
+# -----------------------------------------------------------------------------
+evaluation:
+  # 阈值设置
+  auto_threshold_selection: true
+  threshold_range: [0.1, 0.9]
+  threshold_steps: 10
+  
+  # 评估指标
+  metrics: [f1, precision, recall, tpr, fpr, shd, auroc]
+  eval_samples: 100
+
+# -----------------------------------------------------------------------------
+# Random Seed Configuration
+# -----------------------------------------------------------------------------
+random_seed:
+  use_fixed_seed: true
+  fixed_seed: 21
+  save_seed: true
+  seed_file: experiment_seed.txt
+
+# -----------------------------------------------------------------------------
+# Advanced Feature Configuration
+# -----------------------------------------------------------------------------
+# 联合学习
+joint_learning:
+  enabled: false
+  method: hybrid  # hybrid, sequential, parallel
+  hidden_dim: 64
+
+# 概率处理
+probability_scaling:
+  enable_log_scaling: true     # 启用对数缩放
+  enforce_dag_constraint: true # 强制DAG约束后处理
+  tiny_threshold: 0.25          # 微小值阈值
+
+# 调试可视化
+debug_visualization:
+  debug_mode: false
+  verbose_logging: true
+  save_intermediate_plots: false
+  plot_frequency: 10
+  tensorboard_logging: false
