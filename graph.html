@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Causal Graph</title>
+    <style>
+        body {
+            font-family: "Times New Roman", serif;
+            background-color: #ffffff; /* Changed to pure white */
+            display: flex;
+            flex-direction: column; /* Stack vertically */
+            align-items: center;
+            padding-top: 80px; /* Add padding to prevent overlap with controls */
+            gap: 20px;
+        }
+        .svg-container {
+            border: 1px solid #eee; 
+        }
+        svg {
+            /* border: 1px solid #eee; */ /* Border removed from the tilted element */
+            transform: rotateX(15deg) rotateY(30deg); /* Reversed (counter-clockwise) tilt */
+            overflow: visible; /* Ensure halos aren't clipped */
+        }
+        .node text {
+            pointer-events: none;
+            font-size: 14px;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: grid;
+            grid-template-columns: auto auto;
+            grid-template-rows: auto auto;
+            gap: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            z-index: 10; /* Ensure controls are on top */
+        }
+        #controls button {
+            padding: 8px 12px;
+            font-family: "Times New Roman", serif;
+            cursor: pointer;
+            border: 1px solid #ccc;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+        }
+        #main-container {
+            display: flex;
+            flex-direction: column; /* Stack GT on top of the grid */
+            gap: 40px;
+            align-items: center;
+        }
+        #prediction-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr); /* 2x2 Grid */
+            gap: 40px;
+        }
+        .graph-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .caption {
+            margin-top: 15px;
+            font-size: 16px;
+            font-family: "Times New Roman", serif;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="download-svg-gt-btn">Download SVG (GT)</button>
+        <button id="download-png-gt-btn">Download PNG (GT)</button>
+        <button id="download-svg-cfno-btn">Download SVG (CFNO)</button>
+        <button id="download-png-cfno-btn">Download PNG (CFNO)</button>
+        <button id="download-svg-cuts-btn">Download SVG (CUTS+)</button>
+        <button id="download-png-cuts-btn">Download PNG (CUTS+)</button>
+        <button id="download-svg-esru-btn">Download SVG (eSRU)</button>
+        <button id="download-png-esru-btn">Download PNG (eSRU)</button>
+        <button id="download-svg-csl-btn">Download SVG (CSL)</button>
+        <button id="download-png-csl-btn">Download PNG (CSL)</button>
+    </div>
+
+    <div id="main-container">
+        <div class="graph-wrapper">
+            <div id="gt-container" class="svg-container"></div>
+            <div class="caption">Ground Truth Causal Graph</div>
+        </div>
+        <div id="prediction-grid">
+            <div class="graph-wrapper">
+                <div id="cfno-container" class="svg-container"></div>
+                <div class="caption">CFNO Prediction Analysis</div>
+            </div>
+            <div class="graph-wrapper">
+                <div id="cuts-container" class="svg-container"></div>
+                <div class="caption">CUTS+ Prediction Analysis</div>
+            </div>
+            <div class="graph-wrapper">
+                <div id="esru-container" class="svg-container"></div>
+                <div class="caption">eSRU Prediction Analysis</div>
+            </div>
+            <div class="graph-wrapper">
+                <div id="csl-container" class="svg-container"></div>
+                <div class="caption">CSL-HNTS Prediction Analysis</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+        const gtWidth = 600, gtHeight = 500;
+        const predWidth = 450, predHeight = 400;
+
+        // --- Data ---
+        const colors = {
+            0: '#3E4F94', 1: '#3E90BF', 2: '#58B6E9',
+            3: '#A6C0E3', 4: '#D8D3E7', 5: '#FAF9CB'
+        };
+        
+        const groundTruthGraphData = {
+            nodes: [
+                { id: 0, out_degree: 1 }, { id: 1, out_degree: 3 }, { id: 2, out_degree: 4 },
+                { id: 3, out_degree: 2 }, { id: 4, out_degree: 0 }, { id: 5, out_degree: 3 }
+            ],
+            links: [
+                { source: 0, target: 4 }, { source: 1, target: 0 }, { source: 1, target: 3 },
+                { source: 1, target: 4 }, { source: 2, target: 1 }, { source: 2, target: 3 },
+                { source: 2, target: 4 }, { source: 2, target: 5 }, { source: 3, target: 0 },
+                { source: 3, target: 4 }, { source: 5, target: 0 }, { source: 5, target: 3 },
+                { source: 5, target: 4 }
+            ]
+        };
+
+        const cfnoGraphData = {
+            nodes: JSON.parse(JSON.stringify(groundTruthGraphData.nodes)), // Deep copy
+            links: [
+                // Links based on the new matrix from the image
+                { source: 0, target: 2 }, { source: 0, target: 4 },
+                { source: 1, target: 0 }, { source: 1, target: 4 },
+                { source: 2, target: 1 }, { source: 2, target: 4 }, { source: 2, target: 5 },
+                { source: 3, target: 0 }, { source: 3, target: 4 },
+                { source: 5, target: 0 }, { source: 5, target: 3 }, { source: 5, target: 4 }
+            ]
+        };
+        
+        const cutsGraphData = {
+            nodes: JSON.parse(JSON.stringify(groundTruthGraphData.nodes)), // Deep copy
+            links: [
+                // Links from the CUTS+ matrix
+                { source: 1, target: 0 }, { source: 1, target: 3 }, { source: 1, target: 4 }, { source: 1, target: 5 },
+                { source: 2, target: 0 }, { source: 2, target: 1 }, { source: 2, target: 3 }, { source: 2, target: 4 }, { source: 2, target: 5 },
+                { source: 3, target: 0 }, { source: 3, target: 4 },
+                { source: 4, target: 5 },
+                { source: 5, target: 0 }
+            ]
+        };
+
+        const esruGraphData = {
+            nodes: JSON.parse(JSON.stringify(groundTruthGraphData.nodes)),
+            links: [
+                { source: 0, target: 2 }, { source: 0, target: 4 },
+                { source: 1, target: 0 }, { source: 1, target: 3 },
+                { source: 2, target: 4 }, { source: 2, target: 5 },
+                { source: 3, target: 0 },
+                { source: 5, target: 0 }, { source: 5, target: 3 }, { source: 5, target: 4 }
+            ]
+        };
+
+        const cslHntsGraphData = {
+            nodes: JSON.parse(JSON.stringify(groundTruthGraphData.nodes)),
+            links: [
+                { source: 0, target: 4 },
+                { source: 1, target: 0 }, { source: 1, target: 2 }, { source: 1, target: 3 }, { source: 1, target: 4 },
+                { source: 2, target: 0 }, { source: 2, target: 4 }, { source: 2, target: 5 },
+                { source: 3, target: 0 }, { source: 3, target: 2 }, { source: 3, target: 4 },
+                { source: 5, target: 3 }, { source: 5, target: 4 }
+            ]
+        };
+        
+        // --- Create Comparison Data for Visualization ---
+        function createComparisonData(groundTruthLinks, predictedLinks) {
+            const gtLinksSet = new Set(groundTruthLinks.map(l => `${l.source}->${l.target}`));
+            const predLinksSet = new Set(predictedLinks.map(l => `${l.source}->${l.target}`));
+            const comparisonLinks = [];
+            groundTruthLinks.forEach(link => {
+                const edge = `${link.source}->${link.target}`;
+                if (predLinksSet.has(edge)) {
+                    comparisonLinks.push({ ...link, type: 'TP' }); // True Positive
+                } else {
+                    comparisonLinks.push({ ...link, type: 'FN' }); // False Negative
+                }
+            });
+            predictedLinks.forEach(link => {
+                const edge = `${link.source}->${link.target}`;
+                if (!gtLinksSet.has(edge)) {
+                    comparisonLinks.push({ ...link, type: 'FP' }); // False Positive
+                }
+            });
+            return comparisonLinks;
+        }
+
+        const comparisonCfnoData = {
+            nodes: cfnoGraphData.nodes,
+            links: createComparisonData(groundTruthGraphData.links, cfnoGraphData.links)
+        };
+        
+        const comparisonCutsData = {
+            nodes: cutsGraphData.nodes,
+            links: createComparisonData(groundTruthGraphData.links, cutsGraphData.links)
+        };
+
+        const comparisonEsruData = {
+            nodes: esruGraphData.nodes,
+            links: createComparisonData(groundTruthGraphData.links, esruGraphData.links)
+        };
+        
+        const comparisonCslData = {
+            nodes: cslHntsGraphData.nodes,
+            links: createComparisonData(groundTruthGraphData.links, cslHntsGraphData.links)
+        };
+        
+        // Add index to links for alternating line styles
+        groundTruthGraphData.links.forEach((link, i) => { link.index = i; });
+        comparisonCfnoData.links.forEach((link, i) => { link.index = i; });
+        comparisonCutsData.links.forEach((link, i) => { link.index = i; });
+        comparisonEsruData.links.forEach((link, i) => { link.index = i; });
+        comparisonCslData.links.forEach((link, i) => { link.index = i; });
+
+
+        let gtSvg, cfnoSvg, cutsSvg, esruSvg, cslSvg;
+
+        // --- Setup Download Handlers Immediately ---
+        // This ensures the buttons are clickable from the start.
+        // The svgProvider function is a closure, so it will get the SVG object
+        // when the button is clicked, by which time it should be defined.
+        setupDownload(() => gtSvg, 'download-svg-gt-btn', 'download-png-gt-btn');
+        setupDownload(() => cfnoSvg, 'download-svg-cfno-btn', 'download-png-cfno-btn');
+        setupDownload(() => cutsSvg, 'download-svg-cuts-btn', 'download-png-cuts-btn');
+        setupDownload(() => esruSvg, 'download-svg-esru-btn', 'download-png-esru-btn');
+        setupDownload(() => cslSvg, 'download-svg-csl-btn', 'download-png-csl-btn');
+
+
+        function drawGraph(containerSelector, graphData, isPrimary, onEndCallback) {
+            const graphWidth = isPrimary ? gtWidth : predWidth;
+            const graphHeight = isPrimary ? gtHeight : predHeight;
+
+            const svg = d3.select(containerSelector).append("svg")
+                .attr("width", graphWidth)
+                .attr("height", graphHeight);
+
+            const nodeMap = new Map(graphData.nodes.map(n => [n.id, n]));
+
+            const defs = svg.append("defs");
+            
+            // Define markers for each link type for better visualization
+            const markerColors = {
+                TP: '#333',      // True Positive
+                FP: 'grey',      // False Positive
+                FN: 'red',       // False Negative
+                default: '#333'  // Default for Ground Truth graph
+            };
+
+            Object.entries(markerColors).forEach(([type, color]) => {
+                defs.append("marker")
+                    .attr("id", `arrow-${containerSelector}-${type}`)
+                    .attr("viewBox", "0 -5 10 10")
+                    .attr("refX", 5).attr("refY", 0).attr("markerWidth", 6).attr("markerHeight", 6)
+                    .attr("orient", "auto").append("path").attr("d", "M0,-5L10,0L0,5")
+                    .style("fill", color).style("opacity", 0.8);
+            });
+
+            Object.keys(colors).forEach(key => {
+                const gradient = defs.append("radialGradient").attr("id", `grad-${containerSelector}-${key}`)
+                    .attr("cx", "30%").attr("cy", "30%");
+                gradient.append("stop").attr("offset", "0%").style("stop-color", d3.color(colors[key]).brighter(0.8));
+                gradient.append("stop").attr("offset", "50%").style("stop-color", colors[key]);
+                gradient.append("stop").attr("offset", "100%").style("stop-color", d3.color(colors[key]).darker(0.8));
+            });
+
+            const link = svg.append("g").selectAll("path").data(graphData.links).join("path")
+                .style("stroke-width", 1.5)
+                .style("opacity", 0.8)
+                .style("fill", "none")
+                .style("stroke", d => markerColors[d.type] || markerColors.default)
+                .style("stroke-dasharray", d => (d.type === 'FN' || d.type === 'FP') ? "5, 5" : "none")
+                .attr("marker-end", d => `url(#arrow-${containerSelector}-${d.type || 'default'})`);
+
+            const node = svg.append("g").selectAll("g").data(graphData.nodes).join("g")
+                .attr("class", "node").attr("data-id", d => d.id);
+            node.append("circle").attr("r", 25).style("fill", d => `url(#grad-${containerSelector}-${d.id})`)
+                .style("stroke", "#fff").style("stroke-width", 2).style("opacity", 0.95);
+            node.append("text").text(d => `Node${d.id}`).attr("dy", ".35em")
+                .attr("text-anchor", "middle").style("font-size", "14px").style("fill", "black");
+
+            if (isPrimary) {
+                const simulation = d3.forceSimulation(graphData.nodes)
+                    .force("link", d3.forceLink(graphData.links).id(d => d.id).distance(150))
+                    .force("charge", d3.forceManyBody().strength(-300))
+                    .force("center", d3.forceCenter(graphWidth / 2, graphHeight / 2))
+                    .on("tick", ticked)
+                    .on("end", () => onEndCallback(graphData.nodes)); // Pass final node positions
+            }
+
+            function ticked() {
+                 link.attr("d", d => {
+                    // The force simulation automatically resolves link IDs to node objects.
+                    // For our second, static graph, we must handle this manually using the nodeMap.
+                    const sourceNode = d.source.hasOwnProperty('id') ? d.source : nodeMap.get(d.source);
+                    const targetNode = d.target.hasOwnProperty('id') ? d.target : nodeMap.get(d.target);
+                    
+                    if (!sourceNode || !targetNode) return null; // Don't draw if nodes are missing for any reason
+
+                    const dx = targetNode.x - sourceNode.x, dy = targetNode.y - sourceNode.y, dr = Math.sqrt(dx * dx + dy * dy);
+                    const sourcePadding = 25, targetPadding = 25 + 5;
+                    const sourceX = sourceNode.x + (dx * sourcePadding) / dr, sourceY = sourceNode.y + (dy * sourcePadding) / dr;
+                    const targetX = targetNode.x - (dx * targetPadding) / dr, targetY = targetNode.y - (dy * targetPadding) / dr;
+                    if (d.index % 2 === 0) return `M${sourceX},${sourceY}A${dr * 2},${dr * 2} 0 0,1 ${targetX},${targetY}`;
+                    else return `M${sourceX},${sourceY}L${targetX},${targetY}`;
+                });
+                node.attr("transform", d => `translate(${d.x},${d.y})`);
+            }
+             // Expose the ticked function if we need to call it manually for non-primary graphs
+            svg.ticked = ticked;
+
+            return svg;
+        }
+
+        function drawProbabilityPlot(containerSelector, data) {
+            const margin = { top: 40, right: 30, bottom: 60, left: 60 };
+            const width = 800 - margin.left - margin.right;
+            const height = 500 - margin.top - margin.bottom;
+
+            const svg = d3.select(containerSelector).append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            const x = d3.scaleBand()
+                .domain(d3.range(6).map(i => `Node_${i}`))
+                .range([0, width])
+                .padding(0.2);
+
+            svg.append("g")
+                .attr("transform", `translate(0,${height})`)
+                .call(d3.axisBottom(x))
+                .selectAll("text")
+                .style("font-size", "12px");
+
+            const y = d3.scaleLinear()
+                .domain([0, 1])
+                .range([height, 0]);
+
+            svg.append("g")
+                .call(d3.axisLeft(y))
+                .selectAll("text")
+                .style("font-size", "12px");
+
+            // Add axis labels
+            svg.append("text")
+                .attr("text-anchor", "middle")
+                .attr("x", width / 2)
+                .attr("y", height + margin.bottom / 1.5)
+                .text("Target Node")
+                .style("font-family", "Times New Roman, serif");
+
+            svg.append("text")
+                .attr("text-anchor", "middle")
+                .attr("transform", "rotate(-90)")
+                .attr("y", -margin.left / 1.5)
+                .attr("x", -height / 2)
+                .text("Probability")
+                .style("font-family", "Times New Roman, serif");
+
+            const jitterWidth = x.bandwidth() * 0.6;
+            const probabilityJitter = 0.04;
+
+            const points = svg.selectAll("g.point")
+                .data(data)
+                .join("g")
+                .attr("class", "point");
+            
+            points.append("circle")
+                .attr("cx", d => x(`Node_${d.target}`) + x.bandwidth() / 2 + (Math.random() - 0.5) * jitterWidth)
+                .attr("cy", d => y(d.prob + (Math.random() - 0.5) * probabilityJitter))
+                .attr("r", 12)
+                .style("fill", d => colors[d.source])
+                .style("stroke", "#333")
+                .style("stroke-width", 1)
+                .style("opacity", 0.8);
+            
+            points.append("text")
+                .attr("x", d => x(`Node_${d.target}`) + x.bandwidth() / 2 + (Math.random() - 0.5) * jitterWidth)
+                .attr("y", d => y(d.prob + (Math.random() - 0.5) * probabilityJitter) + 4) // Adjust for vertical alignment
+                .text(d => d.source)
+                .style("fill", "white")
+                .style("font-size", "10px")
+                .style("text-anchor", "middle")
+                .style("pointer-events", "none");
+        }
+
+        // --- Download Logic Abstraction ---
+        function setupDownload(svgProvider, svgBtnId, pngBtnId) {
+             d3.select(`#${svgBtnId}`).on('click', function() {
+                const svg = svgProvider();
+                // ... SVG download logic (copying styles, replacing gradients)
+             });
+             d3.select(`#${pngBtnId}`).on('click', function() {
+                const svg = svgProvider();
+                // ... PNG download logic (rendering to canvas)
+             });
+        }
+
+
+        gtSvg = drawGraph('#gt-container', groundTruthGraphData, true, (finalNodes) => {
+            // When GT graph simulation ends, draw the predicted graph with the same node positions
+            finalNodes.forEach(finalNode => {
+                cfnoGraphData.nodes.find(n => n.id === finalNode.id).x = finalNode.x;
+                cfnoGraphData.nodes.find(n => n.id === finalNode.id).y = finalNode.y;
+                cutsGraphData.nodes.find(n => n.id === finalNode.id).x = finalNode.x;
+                cutsGraphData.nodes.find(n => n.id === finalNode.id).y = finalNode.y;
+                esruGraphData.nodes.find(n => n.id === finalNode.id).x = finalNode.x;
+                esruGraphData.nodes.find(n => n.id === finalNode.id).y = finalNode.y;
+                cslHntsGraphData.nodes.find(n => n.id === finalNode.id).x = finalNode.x;
+                cslHntsGraphData.nodes.find(n => n.id === finalNode.id).y = finalNode.y;
+            });
+
+            cfnoSvg = drawGraph('#cfno-container', comparisonCfnoData, false, () => {});
+            cfnoSvg.ticked();
+
+            cutsSvg = drawGraph('#cuts-container', comparisonCutsData, false, () => {});
+            cutsSvg.ticked();
+
+            esruSvg = drawGraph('#esru-container', comparisonEsruData, false, () => {});
+            esruSvg.ticked();
+
+            cslSvg = drawGraph('#csl-container', comparisonCslData, false, () => {});
+            cslSvg.ticked();
+            
+            // --- Calculate and Display SHD for each method ---
+            function calculateAndDisplaySHD(predictedLinks, gtLinks, captionSelector) {
+                const predSet = new Set(predictedLinks.map(l => `${l.source}->${l.target}`));
+                const gtSet = new Set(gtLinks.map(l => `${l.source}->${l.target}`));
+                
+                let reversals = 0;
+                let falsePositives = 0;
+                let falseNegatives = 0;
+                
+                const gtSetCopy = new Set(gtSet); // Work on a copy of the ground truth set
+
+                // Iterate through predicted edges to find TPs, FPs, and Reversals
+                for (const predEdge of predSet) {
+                    const [source, target] = predEdge.split('->');
+                    const reversedEdge = `${target}->${source}`;
+
+                    if (gtSetCopy.has(predEdge)) {
+                        // True Positive: Correctly identified. Remove from GT copy to avoid counting as FN.
+                        gtSetCopy.delete(predEdge);
+                    } else if (gtSetCopy.has(reversedEdge)) {
+                        // Reversal: An edge exists but in the opposite direction.
+                        reversals++;
+                        // Remove the reversed edge from GT copy so it's not counted as FN.
+                        gtSetCopy.delete(reversedEdge);
+                    } else {
+                        // False Positive: An edge that doesn't exist in any form in GT.
+                        falsePositives++;
+                    }
+                }
+
+                // Any edges left in the gtSetCopy are edges that were in GT but not found in Pred in any form.
+                falseNegatives = gtSetCopy.size;
+                
+                // SHD is the sum of additions (FP), deletions (FN), and reversals.
+                const shd = falsePositives + falseNegatives + reversals;
+                
+                const captionEl = document.querySelector(captionSelector);
+                if (captionEl) {
+                    // Avoid appending SHD multiple times if function is re-run
+                    let currentText = captionEl.textContent;
+                    const shdIndex = currentText.indexOf(' (SHD:');
+                    if (shdIndex !== -1) {
+                        currentText = currentText.substring(0, shdIndex);
+                    }
+                    captionEl.textContent = `${currentText} (SHD: ${shd})`;
+                }
+            }
+
+            calculateAndDisplaySHD(cfnoGraphData.links, groundTruthGraphData.links, '#cfno-container + .caption');
+            calculateAndDisplaySHD(cutsGraphData.links, groundTruthGraphData.links, '#cuts-container + .caption');
+            calculateAndDisplaySHD(esruGraphData.links, groundTruthGraphData.links, '#esru-container + .caption');
+            calculateAndDisplaySHD(cslHntsGraphData.links, groundTruthGraphData.links, '#csl-container + .caption');
+            
+            // Download handlers are now set up outside this callback.
+        });
+
+
+        // --- Reusable Download Functions ---
+        function setupDownload(svgProvider, svgBtnId, pngBtnId) {
+            d3.select(`#${svgBtnId}`).on('click', function() {
+                const svgNode = svgProvider().node();
+                if (!svgNode) return;
+
+                function copyStyles(source, dest) {
+                    const styleProperties = [ 'stroke', 'stroke-width', 'stroke-opacity', 'stroke-dasharray', 'fill', 'fill-opacity', 'fill-rule', 'font-family', 'font-size', 'font-weight', 'text-anchor', 'opacity', 'pointer-events' ];
+                    const computedStyle = window.getComputedStyle(source);
+                    let styleStr = '';
+                    for (const prop of styleProperties) {
+                        const value = computedStyle.getPropertyValue(prop);
+                        if (value) styleStr += `${prop}: ${value}; `;
+                    }
+                    dest.setAttribute('style', styleStr);
+                    dest.removeAttribute('class');
+                    for (let i = 0; i < source.children.length; i++) copyStyles(source.children[i], dest.children[i]);
+                }
+                const clonedSvg = svgNode.cloneNode(true);
+                clonedSvg.querySelectorAll('g.node').forEach((g, i) => g.setAttribute('transform', d3.select(svgNode.querySelectorAll('g.node')[i]).attr('transform')));
+                clonedSvg.querySelectorAll('path').forEach((path, i) => path.setAttribute('d', d3.select(svgNode.querySelectorAll('path')[i]).attr('d')));
+                clonedSvg.style.transform = '';
+                copyStyles(svgNode, clonedSvg);
+                clonedSvg.querySelectorAll('g[data-id]').forEach(nodeEl => {
+                    const nodeId = nodeEl.getAttribute('data-id');
+                    const solidColor = colors[nodeId];
+                    const circle = nodeEl.querySelector('circle');
+                    if (circle && solidColor) {
+                        let style = circle.getAttribute('style') || '';
+                        style = style.replace(/fill: url\(.*?\);/, `fill: ${solidColor};`);
+                        circle.setAttribute('style', style);
+                    }
+                    const text = nodeEl.querySelector('text');
+                    if (text) {
+                        let style = text.getAttribute('style') || '';
+                        style = style.replace(/fill: rgb\(0, 0, 0\);/, 'fill: #ffffff;');
+                        text.setAttribute('style', style);
+                    }
+                });
+                clonedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+                const svgData = clonedSvg.outerHTML;
+                const preface = '<?xml version="1.0" standalone="no"?>\r\n';
+                const svgBlob = new Blob([preface, svgData], {type:"image/svg+xml;charset=utf-8"});
+                const svgUrl = URL.createObjectURL(svgBlob);
+                const downloadLink = document.createElement("a");
+                downloadLink.href = svgUrl;
+                downloadLink.download = `${svgBtnId}.svg`;
+                document.body.appendChild(downloadLink);
+                downloadLink.click();
+                document.body.removeChild(downloadLink);
+            });
+
+            d3.select(`#${pngBtnId}`).on('click', function() {
+                const svgNode = svgProvider().node();
+                if (!svgNode) return;
+                const scale = 6;
+                const svgWidth = svgNode.getAttribute('width');
+                const svgHeight = svgNode.getAttribute('height');
+                const canvas = document.createElement('canvas');
+                canvas.width = svgWidth * scale;
+                canvas.height = svgHeight * scale;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = "#ffffff";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                const svgClone = svgNode.cloneNode(true);
+                svgClone.querySelectorAll('g.node').forEach((g, i) => g.setAttribute('transform', d3.select(svgNode.querySelectorAll('g.node')[i]).attr('transform')));
+                svgClone.querySelectorAll('path').forEach((path, i) => path.setAttribute('d', d3.select(svgNode.querySelectorAll('path')[i]).attr('d')));
+                (function copyStyles(source, dest) {
+                    const computedStyle = window.getComputedStyle(source);
+                    let styleStr = '';
+                    for (const prop of computedStyle) styleStr += `${prop}: ${computedStyle.getPropertyValue(prop)}; `;
+                    dest.setAttribute('style', styleStr);
+                    for (let i = 0; i < source.children.length; i++) copyStyles(source.children[i], dest.children[i]);
+                })(svgNode, svgClone);
+                const svgData = new XMLSerializer().serializeToString(svgClone);
+                const img = new Image();
+                const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+                const url = URL.createObjectURL(svgBlob);
+                img.onload = function () {
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    URL.revokeObjectURL(url);
+                    const pngUrl = canvas.toDataURL('image/png');
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = pngUrl;
+                    downloadLink.download = `${pngBtnId}.png`;
+                    document.body.appendChild(downloadLink);
+                    downloadLink.click();
+                    document.body.removeChild(downloadLink);
+                };
+                img.src = url;
+            });
+        }
+    </script>
+</body>
+</html> 
