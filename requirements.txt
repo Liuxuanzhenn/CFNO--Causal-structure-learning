@@ -1,0 +1,12 @@
+torch>=1.9.0
+matplotlib>=3.3.4
+pandas>=1.2.3
+scikit-learn>=0.24.1
+numpy>=1.20.1
+tqdm>=4.59.0
+seaborn>=0.11.1
+networkx>=2.5
+causallearn>=0.1.2.8
+notears>=0.1
+dagma>=0.1
+jupyter>=1.0.0 
